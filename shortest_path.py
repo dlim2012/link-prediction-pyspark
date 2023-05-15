@@ -70,16 +70,20 @@ num_nodes = nodes.count()
 print("nodes")
 print(nodes.toPandas())
 
+print(num_nodes)
+
 result = np.zeros((num_nodes, num_nodes))
 
 for j, row in tqdm(enumerate(nodes.collect()), total=num_nodes):
   node = row["node"]
-  shortest_length = initial_shortest_length = nodes\
+  shortest_length = nodes\
     .withColumn("shortest_length", F.when(nodes["node"] != node, F.lit(10000000)).otherwise(0))\
     .orderBy("node")
-  for i in tqdm(range(shortest_length.count()), total=shortest_length.count()):
+  # print(shortest_length.orderBy("node").select("shortest_length").toPandas())
+
+  for i in tqdm(range(shortest_length.count()), total=num_nodes):
     temp = shortest_length\
-      .join(edges.select("u", "v"), shortest_length["node"] == edges["u"])\
+      .join(edges.select("u", "v"), shortest_length["node"] == edges["u"], "outer")\
       .groupBy("v")\
       .agg(F.min("shortest_length").alias("temp"))\
       .select("v", "temp")\
@@ -92,8 +96,11 @@ for j, row in tqdm(enumerate(nodes.collect()), total=num_nodes):
           )\
           .select("node", "new_shortest_length")\
           .withColumnRenamed("new_shortest_length", "shortest_length")
-    temp.collect()
+
+    # The following line solves the memory problem, but the overall time consumption is still very big
     shortest_length = spark.createDataFrame(shortest_length.collect())
+
+
   print(node)
   print(shortest_length.orderBy("node").select("shortest_length").toPandas())
   result[j] = np.array(shortest_length.orderBy("node").select("shortest_length").collect()).squeeze(1)

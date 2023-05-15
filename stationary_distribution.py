@@ -63,21 +63,20 @@ print("nodes")
 print(nodes.toPandas())
 
 
-_katz_adj = nodes.withColumnRenamed("node", "_u")\
+_adj = nodes.withColumnRenamed("node", "_u")\
   .join(nodes.withColumnRenamed("node", "_v"))\
   .orderBy("_u", "_v")
 
-beta = 1 / (1.5 * maxCount)
 
-katz_edges = edges\
-  .withColumn("value", edges["count"] * beta)\
+_edges = edges\
+  .withColumn("value", edges["count"])\
   .drop("count")
 
-katz_adj = _katz_adj\
+adj = _adj\
   .join(
-    katz_edges,
-    (_katz_adj._u == katz_edges.u)
-      & (_katz_adj._v == katz_edges.v),
+    _edges,
+    (_adj._u == _edges.u)
+      & (_adj._v == _edges.v),
     'left'
   )\
   .select("_u", "_v", "value")\
@@ -85,33 +84,39 @@ katz_adj = _katz_adj\
   .withColumnRenamed("_u", "u")\
   .withColumnRenamed("_v", "v")
 
-print("katz_adj")
-print(katz_adj.orderBy("u", "v").toPandas())
+print("adj")
+print(adj.orderBy("u", "v").toPandas())
 
-katz_w = Window.partitionBy("u").orderBy("v")
-_katz_A = katz_adj\
-  .withColumn("sorted_list", F.collect_list("value").over(katz_w))\
+w = Window.partitionBy("u").orderBy("v")
+_A = adj\
+  .withColumn("sorted_list", F.collect_list("value").over(w))\
   .groupBy("u")\
   .agg(F.max("sorted_list").alias('row'))\
   .orderBy('u')\
   .withColumn("id", F.monotonically_increasing_id())
 
-print("_katz_A")
-print(_katz_A.toPandas())
+print("A")
+print(_A.toPandas())
 
 
-katz_A = IndexedRowMatrix(_katz_A.select("id", "row").rdd.map(lambda row: IndexedRow(*row)))\
+A = IndexedRowMatrix(_A.select("id", "row").rdd.map(lambda row: IndexedRow(*row)))\
   .toBlockMatrix(num_nodes, num_nodes)
-katz_matrix = IndexedRowMatrix(_katz_A.select("id", "row").rdd.map(lambda row: IndexedRow(*row)))\
+matrix = IndexedRowMatrix(_A.select("id", "row").rdd.map(lambda row: IndexedRow(*row)))\
   .toBlockMatrix(num_nodes, num_nodes)
-katz_scores = IndexedRowMatrix(sc.parallelize([IndexedRow(_, [0] * num_nodes) for _ in range(num_nodes)]))\
+stationary_distribution = IndexedRowMatrix(sc.parallelize([IndexedRow(_, [0] * num_nodes) for _ in range(num_nodes)]))\
   .toBlockMatrix(num_nodes, num_nodes)
-katz_A.toLocalMatrix().toArray()
+A.toLocalMatrix().toArray()
+
+print(A.toLocalMatrix().toArray())
 
 n = 100
+_n = int(n*0.9)
 for i in tqdm(range(n), total=n):
-  katz_scores = katz_scores.add(katz_matrix)
-  katz_matrix = katz_matrix.multiply(katz_A)
-print(katz_scores.toLocalMatrix().toArray())
+  matrix = matrix.multiply(A)
+  if i >= _n:
+      stationary_distribution = stationary_distribution.add(matrix)
 
-np.save(os.path.join(save_dir, f"{filename.split('.')[0]}_katz-scores.npy"), katz_scores)
+print(stationary_distribution.toLocalMatrix().toArray())
+
+np.save(os.path.join(save_dir, f"{filename.split('.')[0]}_stationary-distribution.npy"),
+        stationary_distribution.toLocalMatrix().toArray() / (n - _n))
