@@ -60,12 +60,12 @@ print(edges.orderBy("u", "v").toPandas())
 
 nodes = train_df\
   .select("u")\
-  .intersect(edges.select("v"))\
+  .union(edges.select("v"))\
   .withColumnRenamed("u", "node")\
-  .orderBy("node")
+  .distinct().orderBy("node")
 
-
-nodes.write.mode("ignore").csv(os.path.join(save_dir, f"{filename.split('.')[0]}_nodes.csv"))
+nodes.toPandas().to_csv(os.path.join(save_dir, f"{filename.split('.')[0]}_nodes_hitting-time.csv"))
+#nodes.write.mode("ignore").csv(os.path.join(save_dir, f"{filename.split('.')[0]}_nodes.csv"))
 
 num_nodes = nodes.count()
 print("nodes")
@@ -100,7 +100,7 @@ hitting_adj = hitting_adj\
       'left'
   )\
   .fillna(0)\
-  .withColumn("prob", F.expr("count / (total + 1e-15)"))\
+  .withColumn("prob", F.expr("count / total"))\
   .select("_u", "_v", "prob")\
   .withColumnRenamed("_u", "u")\
   .withColumnRenamed("_v", "v")

@@ -9,8 +9,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql import Window
 from tqdm import tqdm
 
-# filename = "email-Eu-core-temporal-Dept3.txt"
-filename = "email-Eu-core-temporal.txt"
+filename = "email-Eu-core-temporal-Dept3.txt"
+# filename = "email-Eu-core-temporal.txt"
 save_dir = "results"
 os.makedirs(save_dir, exist_ok=True)
 
@@ -36,42 +36,53 @@ test_df = df.filter(F.col("t") >= 20_000_000).filter(F.col("t") < 22_000_000)
 train_df.toPandas(), test_df.toPandas()
 
 
+# u, v
 edges = train_df\
   .drop("t")\
   .groupby("u", "v")\
   .count()
 
-maxCount = edges\
-  .select(
-      F.max(edges["count"]).alias("maxCount")
-  ).collect()[0]["maxCount"]
-
-print("edges")
-print(edges.orderBy("u", "v").toPandas())
-
 nodes = train_df\
   .select("u")\
-  .intersect(edges.select("v"))\
+  .union(edges.select("v"))\
   .withColumnRenamed("u", "node")\
-  .orderBy("node")
+  .distinct().orderBy("node")
 
-
-nodes.write.mode("ignore").csv(os.path.join(save_dir, f"{filename.split('.')[0]}_nodes.csv"))
-
+# nodes.write.mode("ignore").csv(os.path.join(save_dir, f"{filename.split('.')[0]}_nodes.csv"))
 num_nodes = nodes.count()
-print("nodes")
-print(nodes.toPandas())
 
-
+# _u, _v
 _adj = nodes.withColumnRenamed("node", "_u")\
   .join(nodes.withColumnRenamed("node", "_v"))\
   .orderBy("_u", "_v")
 
+# __u, total
+_total = edges\
+  .groupBy("u")\
+  .agg(F.sum(edges["count"]))\
+  .withColumnRenamed("sum(count)", "total")\
+  .withColumnRenamed("u", "__u")
 
+"""
+T = [
+[0, 1, 0]
+[0.5, 0, 0.5]
+[0, 0, 0]
+]
+
+"""
+
+# u, value
 _edges = edges\
-  .withColumn("value", edges["count"])\
-  .drop("count")
+  .join(_total, edges.u == _total.__u)\
+  .withColumn("value", edges["count"] / (_total["total"]))\
+  .drop("count")\
+  .drop("total")\
+  .drop("__u")
 
+print("_edges", _edges.toPandas())
+
+# u, v, value
 adj = _adj\
   .join(
     _edges,
@@ -107,16 +118,17 @@ stationary_distribution = IndexedRowMatrix(sc.parallelize([IndexedRow(_, [0] * n
   .toBlockMatrix(num_nodes, num_nodes)
 A.toLocalMatrix().toArray()
 
+print("A")
 print(A.toLocalMatrix().toArray())
 
 n = 100
 _n = int(n*0.9)
 for i in tqdm(range(n), total=n):
   matrix = matrix.multiply(A)
+  # print(matrix.toLocalMatrix().toArray())
   if i >= _n:
       stationary_distribution = stationary_distribution.add(matrix)
 
-print(stationary_distribution.toLocalMatrix().toArray())
 
 np.save(os.path.join(save_dir, f"{filename.split('.')[0]}_stationary-distribution.npy"),
         stationary_distribution.toLocalMatrix().toArray() / (n - _n))

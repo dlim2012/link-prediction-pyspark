@@ -51,10 +51,9 @@ print(edges.orderBy("u", "v").toPandas())
 
 nodes = train_df\
   .select("u")\
-  .intersect(edges.select("v"))\
+  .union(edges.select("v"))\
   .withColumnRenamed("u", "node")\
   .orderBy("node")
-
 
 nodes.write.mode("ignore").csv(os.path.join(save_dir, f"{filename.split('.')[0]}_nodes.csv"))
 
